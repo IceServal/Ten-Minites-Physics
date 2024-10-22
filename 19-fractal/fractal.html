@@ -1,0 +1,401 @@
+<!--
+Copyright 2022 Matthias Müller - Ten Minute Physics, https://www.youtube.com/channel/UCTG_vrRdKYfrpqCv_WV4eyA
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+-->
+
+<!DOCTYPE html>
+<html lang = "en">
+    <meta charset = "UTF-8" name = "viewport" content = "width = device-width, initial-scale = 1.0">
+
+    <head>
+        <title>Fractals</title>
+        <style>
+            body {
+                font-family: "Cascadia Code";
+                font-size: 15px;
+                fieldset {
+                    display: inline-block;
+                };
+                input[type = "range"] {
+                    height: 15px;
+                };
+            };
+            .button {
+                background-color: #606060;
+                border: none;
+                color: white;
+                padding: 10px 10px;
+                font-size: 16px;
+                margin: 4px 2px;
+                cursor: pointer;
+            };
+            .slider {
+                appearance: none;
+                width: 80px;
+                height: 6px;
+                border-radius: 5px;
+                background: #D3D3D3;
+                outline: none;
+                opacity: 0.7;
+                transition: opacity 0.2s;
+            };
+        </style>
+    </head>
+
+    <body>
+        <fieldset id = "type">
+            <legend>Type</legend>
+            <label><input type = "radio" id = "julia" name = "type" value = "julia" checked>Julia</label>
+            <label><input type = "radio" id = "mandelbrot" name = "type" value = "mandelbrot">Mandelbrot</label>
+		</fieldset>
+
+        <fieldset id = "mode">
+            <legend>Mode</legend>
+            <label><input type = "radio" id = "mono" name = "mode" value = "mono" checked>Mono</label>
+            <label><input type = "radio" id = "gradient" name = "mode" value = "gradient">Gradient</label>
+		</fieldset>
+
+        <fieldset>
+            <legend>Iteration</legend>
+            <input type = "range" min = "1" max = "500" value = "50" id = "iteration">
+            <label id = "num-iterations" for = "iteration">50</label>
+		</fieldset>
+
+        <br>
+        <br>
+        <canvas id = "canvas"></canvas>
+
+        <script src = "../utility/math/vector.js"></script>
+        <script src = "../utility/canvas.js"></script>
+        <script>
+            let canvas = document.getElementById("canvas");
+            canvas.width = window.innerWidth - 10;
+            canvas.height = window.innerHeight - 100;
+            canvas.focus();
+
+            let context = canvas.getContext("2d", { willReadFrequently: true});
+
+            let divergency_hint = 4.0;
+            let gradient_colors = [
+                [ 15,   2,  66],
+                [191,  41,  12],
+                [222,  99,  11],
+                [255, 255, 255],
+                [102, 173, 183],
+                [ 14,  29, 104],
+            ];
+
+            let type = undefined;
+            let mode = undefined;
+            let scale = undefined;
+            let center = undefined;
+            let num_max_iterations = undefined;
+            let julia_constant = undefined;
+
+            function check_divergency(position, constant)
+            {
+                for (let num_iterations = 0; num_iterations < num_max_iterations; num_iterations++) {
+                    let x_squared = position.x * position.x;
+                    let y_squared = position.y * position.y;
+                    if (x_squared + y_squared > divergency_hint) return num_iterations;
+
+                    position.y = 2.0 * position.x * position.y;
+                    position.x = x_squared - y_squared;
+                    position.x += constant.x;
+                    position.y += constant.y;
+                }
+
+                return num_max_iterations;
+            }
+
+            function divergence_iteration_to_gradient_color(num_iterations)
+            {
+                let result = [0, 0, 0];
+
+                num_iterations = Math.min(Math.max(num_iterations, 0), num_max_iterations);
+                let num_colors = gradient_colors.length;
+                let color_level = (num_iterations / num_max_iterations) * (num_colors - 1);
+                let color_index = Math.floor(color_level);
+                let color_ratio = color_level - color_index;
+                if (color_index == num_colors - 1) {
+                    color_index--;
+                    color_ratio = 1.0;
+                }
+                let color_index_0 = color_index;
+                let color_index_1 = color_index_0 + 1;
+                for (let i = 0; i < 3; i++) {
+                    let color_0 = gradient_colors[color_index_0][i];
+                    let color_1 = gradient_colors[color_index_1][i];
+                    result[i] = Math.floor(color_0 + (color_1 - color_0) * color_ratio);
+                }
+
+                return result;
+            }
+
+            function draw_mono_julia()
+            {
+                context.clearRect(0, 0, canvas.width, canvas.height);
+                context.fillStyle = "#FF0000";
+
+                let image = context.getImageData(0, 0, canvas.width, canvas.height);
+                let index = 0;
+                let y = center.y - canvas.height / 2.0 * scale;
+                for (let j = canvas.height - 1; j >= 0; j--) {
+                    let x = center.x - canvas.width / 2.0 * scale;
+                    for (let i = 0; i < canvas.width; i++) {
+                        let position = Vector2.from_components(x, y);
+                        let num_iterations = check_divergency(position, julia_constant);
+                        if (num_iterations < num_max_iterations) {
+                            image.data[index++] = 0;
+                            image.data[index++] = 0;
+                            image.data[index++] = 0;
+                        } else {
+                            image.data[index++] = 255;
+                            image.data[index++] = 192;
+                            image.data[index++] =   0;
+                        }
+                        image.data[index++] = 255;
+                        x += scale;
+                    }
+                    y += scale;
+                }
+                context.putImageData(image, 0, 0);
+            }
+
+            function draw_gradient_julia()
+            {
+                context.clearRect(0, 0, canvas.width, canvas.height);
+                context.fillStyle = "#FF0000";
+
+                let image = context.getImageData(0, 0, canvas.width, canvas.height);
+                let index = 0;
+                let y = center.y - canvas.height / 2.0 * scale;
+                for (let j = canvas.height - 1; j >= 0; j--) {
+                    let x = center.x - canvas.width / 2.0 * scale;
+                    for (let i = 0; i < canvas.width; i++) {
+                        let position = Vector2.from_components(x, y);
+                        let num_iterations = check_divergency(position, julia_constant);
+                        if (num_iterations < num_max_iterations) {
+                            let color = divergence_iteration_to_gradient_color(num_iterations);
+                            image.data[index++] = color[0];
+                            image.data[index++] = color[1];
+                            image.data[index++] = color[2];
+                        } else {
+                            image.data[index++] = 0;
+                            image.data[index++] = 0;
+                            image.data[index++] = 0;
+                        }
+                        image.data[index++] = 255;
+                        x += scale;
+                    }
+                    y += scale;
+                }
+                context.putImageData(image, 0, 0);
+            }
+
+            function draw_mono_mandelbrot()
+            {
+                context.clearRect(0, 0, canvas.width, canvas.height);
+                context.fillStyle = "#FF0000";
+
+                let image = context.getImageData(0, 0, canvas.width, canvas.height);
+                let index = 0;
+                let y = center.y - canvas.height / 2.0 * scale;
+                for (let j = canvas.height - 1; j >= 0; j--) {
+                    let x = center.x - canvas.width / 2.0 * scale;
+                    for (let i = 0; i < canvas.width; i++) {
+                        let position = Vector2.from_components(x, y);
+                        let constant = position.clone();
+                        let num_iterations = check_divergency(position, constant);
+                        if (num_iterations < num_max_iterations) {
+                            image.data[index++] = 0;
+                            image.data[index++] = 0;
+                            image.data[index++] = 0;
+                        } else {
+                            image.data[index++] = 255;
+                            image.data[index++] = 192;
+                            image.data[index++] =   0;
+                        }
+                        image.data[index++] = 255;
+                        x += scale;
+                    }
+                    y += scale;
+                }
+                context.putImageData(image, 0, 0);
+            }
+
+            function draw_gradient_mandelbrot()
+            {
+                context.clearRect(0, 0, canvas.width, canvas.height);
+                context.fillStyle = "#FF0000";
+
+                let image = context.getImageData(0, 0, canvas.width, canvas.height);
+                let index = 0;
+                let y = center.y - canvas.height / 2.0 * scale;
+                for (let j = canvas.height - 1; j >= 0; j--) {
+                    let x = center.x - canvas.width / 2.0 * scale;
+                    for (let i = 0; i < canvas.width; i++) {
+                        let position = Vector2.from_components(x, y);
+                        let constant = position.clone();
+                        let num_iterations = check_divergency(position, constant);
+                        if (num_iterations < num_max_iterations) {
+                            let color = divergence_iteration_to_gradient_color(num_iterations);
+                            image.data[index++] = color[0];
+                            image.data[index++] = color[1];
+                            image.data[index++] = color[2];
+                        } else {
+                            image.data[index++] = 0;
+                            image.data[index++] = 0;
+                            image.data[index++] = 0;
+                        }
+                        image.data[index++] = 255;
+                        x += scale;
+                    }
+                    y += scale;
+                }
+                context.putImageData(image, 0, 0);
+            }
+
+            let function_table = {
+                julia: {
+                    mono: draw_mono_julia,
+                    gradient: draw_gradient_julia,
+                },
+                mandelbrot: {
+                    mono: draw_mono_mandelbrot,
+                    gradient: draw_gradient_mandelbrot,
+                },
+            };
+
+            function draw()
+            {
+                let draw_function = function_table[type][mode];
+                if (draw_function != undefined) {
+                    draw_function();
+                } else {
+                    console.log("Unsupported fractal configuratiion: (", type, ", ", mode, ").");
+                }
+            }
+
+            function restart()
+            {
+                {
+                    type = "julia";
+                    let radios = document.querySelectorAll(`input[type = "radio"][name = "type"]`);
+                    radios.forEach(radio => {
+                        if (radio.value == type) {
+                            radio.checked = true;
+                        }
+                    });
+                    julia_constant = Vector2.from_components(-0.6258, 0.4025);
+                }
+
+                {
+                    mode = "mono";
+                    let radios = document.querySelectorAll(`input[type = "radio"][name = "mode"]`);
+                    radios.forEach(radio => {
+                        if (radio.value == mode) {
+                            radio.checked = true;
+                        }
+                    });
+                }
+
+                scale = 0.0035;
+                center = Vector2.from_components();
+                num_max_iterations = 50;
+                document.getElementById("iteration").value = num_max_iterations;
+                document.getElementById("num-iterations").innerHTML = num_max_iterations.toString();
+
+                draw();
+            }
+
+            function mainloop()
+            {
+                requestAnimationFrame(mainloop);
+            }
+
+            restart();
+            mainloop();
+
+            document.getElementById("iteration").oninput = function () {
+                num_max_iterations = this.value;
+                document.getElementById("num-iterations").innerHTML = num_max_iterations.toString();
+
+                draw();
+            };
+            document.getElementById("type").addEventListener("change", (event) => {
+                type = event.target.value;
+
+                draw();
+            });
+            document.getElementById("mode").addEventListener("change", (event) => {
+                mode = event.target.value;
+
+                draw();
+            });
+
+            let grabbing = false;
+            let old_mouse_position = Vector2.from_components();
+
+            function grab(position)
+            {
+                grabbing = true;
+                old_mouse_position.copy(position);
+            }
+
+            function move(position, shift_pressed = false)
+            {
+                if (!grabbing) return;
+
+                let delta_position = position.clone().subtract(old_mouse_position);
+                if (shift_pressed) {
+                    julia_constant.add(delta_position, 0.1 * scale);
+                } else {
+                    center.subtract(delta_position, scale);
+                }
+                old_mouse_position.copy(position);
+
+                draw();
+            }
+
+            function drop(position)
+            {
+                grabbing = false;
+                old_mouse_position.clear();
+            }
+
+            canvas.addEventListener("mousedown", event => {
+                grab(Vector2.from_components(event.x, event.y));
+            });
+            canvas.addEventListener("mousemove", event => {
+                move(Vector2.from_components(event.x, event.y), event.shiftKey);
+            });
+            canvas.addEventListener("mouseup", event => {
+                drop(Vector2.from_components(event.x, event.y));
+            });
+            canvas.addEventListener("touchstart", event => {
+                grab(Vector2.from_components(event.touches[0].clientX, event.touches[0].clientY));
+            });
+            canvas.addEventListener(
+                "touchmove",
+                event => {
+                    event.preventDefault();
+                    event.stopImmediatePropagation();
+                    move(Vector2.from_components(event.touches[0].clientX, event.touches[0].clientY));
+                },
+                {
+                    passive: false,
+                },
+            );
+            canvas.addEventListener("touchend", event => {
+                drop(Vector2.from_components(event.touches[0].clientX, event.touches[0].clientY));
+            });
+        </script>
+    </body>
+</html>
+

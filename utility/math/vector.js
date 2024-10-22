@@ -52,6 +52,13 @@ class Vector2
         return this;
     }
 
+    clear()
+    {
+        this.x = 0.0;
+        this.y = 0.0;
+        return this;
+    }
+
     set_components(x, y)
     {
         this.x = x;
@@ -77,6 +84,13 @@ class Vector2
     {
         this.x -= scaling * a.x;
         this.y -= scaling * a.y;
+        return this;
+    }
+
+    subtract_components(x, y, scaling = 1.0)
+    {
+        this.x -= scaling * x;
+        this.y -= scaling * y;
         return this;
     }
 
