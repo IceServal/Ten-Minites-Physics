@@ -1,0 +1,363 @@
+<!--
+Copyright 2022 Matthias Müller - Ten Minute Physics, https://www.youtube.com/channel/UCTG_vrRdKYfrpqCv_WV4eyA
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+-->
+
+<!DOCTYPE html>
+<html lang = "en">
+    <meta charset = "UTF-8" name = "viewport" content = "width = device-width, initial-scale = 1.0">
+
+    <head>
+        <title>Height Field Water</title>
+        <style>
+            body {
+                font-family: "Cascadia Code";
+                font-size: 15px;
+            };
+            .button {
+                background-color: #606060;
+                border: none;
+                color: white;
+                padding: 10px 32px;
+                font-size: 16px;
+                margin: 4px 2px;
+                cursor: pointer;
+            };
+        </style>
+    </head>
+
+    <body>
+        <h1>Height Field Water</h1>
+        <button class = "button" type = "button" id = "button-run" onclick = "pause_or_resume()">Run</button>
+        <button class = "button" type = "button" id = "button-restart" onclick = "restart()">Restart</button>
+		<span id = "performance">0.000</span> ms per frame.
+
+        <br>
+        <br>
+        <div id = "container"></div>
+
+        <script src = "https://unpkg.com/three@0.139.2/build/three.min.js"></script>
+        <script src = "https://unpkg.com/three@0.139.2/examples/js/controls/OrbitControls.js"></script>
+        <script src = "./ball.js"></script>
+        <script src = "./water.js"></script>
+        <script id = "water-vertex-shader" type = "x-shader/x-vertex">
+            varying vec3 vertex_normal;
+            varying vec3 vertex_position;
+            varying vec2 vertex_screen_position;
+            varying vec3 vertex_camera_position;
+            varying float vertex_offset;
+
+            void main()
+            {
+                vertex_normal = normal;
+
+                vertex_position = position;
+                vec4 clip_position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                vertex_screen_position = vec2(0.5, 0.5) + 0.5 * vec2(clip_position) / clip_position.w;
+                mat4 viewModelMatrix = inverse(modelViewMatrix);
+                vertex_camera_position = vec3(viewModelMatrix[3][0], viewModelMatrix[3][1], viewModelMatrix[3][2]);
+
+                vec4 near_plane_screen_position = vec4(vertex_screen_position.xy, -1.0, 1.0);
+                vec4 near_plane_clip_position = inverse(projectionMatrix) * near_plane_screen_position;
+                near_plane_clip_position = near_plane_clip_position / near_plane_clip_position.w;
+                vec4 near_plane_world_position = viewModelMatrix * near_plane_clip_position;
+                float distance = distance(near_plane_world_position.xyz, position);
+                vertex_offset = 0.025;
+                if (distance > 1.0) {
+                    vertex_offset /= distance;
+                }
+
+                gl_Position = clip_position;
+            }
+        </script>
+        <script id = "water-fragment-shader" type = "x-shader/x-fragment">
+            uniform sampler2D background;
+
+            varying vec3 vertex_normal;
+            varying vec3 vertex_position;
+            varying vec2 vertex_screen_position;
+            varying vec3 vertex_camera_position;
+            varying float vertex_offset;
+
+            float water_diffuse = 0.2;
+
+            void main()
+            {
+                vec2 uv = vertex_screen_position + vertex_offset * vec2(vertex_normal.x, vertex_normal.z);
+                vec4 color = texture2D(background, uv);
+                color.z = min(color.z + water_diffuse, 1.0);
+
+                vec3 view_direction = normalize(vertex_camera_position - vertex_position);
+                float grazing = dot(view_direction, normalize(vertex_normal));
+                color = mix(color, vec4(1.0, 1.0, 1.0, 1.0), pow(1.0 - grazing, 5.0));
+
+                gl_FragColor = color;
+            }
+        </script>
+
+        <script src = "../tool/compact-vector.js"></script>
+        <script src = "../tool/grabber.js"></script>
+        <script src = "../tool/hasher.js"></script>
+        <script src = "../tool/math.js"></script>
+        <script>
+            let initialized = false;
+
+            let scene = undefined;
+            let camera = undefined;
+            let grabber = undefined;
+            let renderer = undefined;
+            let controller = undefined;
+
+            let framebuffer = undefined;
+
+            let shrink_x = 15;
+            let shrink_y = 125;
+
+            let balls = undefined;
+            let water = undefined;
+
+            let world = {
+                paused: true,
+
+                time: 0.0,
+                timeslice: 1.0 / 60.0,
+                real_time: 0.0,
+
+                gravity: new THREE.Vector3(0.0, -10.0, 0.0),
+
+                tank_size: new THREE.Vector3(2.5, 1.0, 3.0),
+                tank_border_thickness: 0.03,
+
+                update: function () {
+                    if (world.paused) return;
+
+                    let num_balls = balls.length;
+                    for (let i = 0; i < num_balls; i++) {
+                        let ball = balls[i];
+                        ball.apply_acceleration(world.gravity);
+                    }
+                    for (let i = 0; i < num_balls; i++) {
+                        let ball_0 = balls[i];
+                        for (let j = i + 1; j < num_balls; j++) {
+                            let ball_1 = balls[j];
+                            ball_0.collide_with(ball_1);
+                        }
+                    }
+                    for (let i = 0; i < num_balls; i++) {
+                        let ball = balls[i];
+                        ball.update(world.timeslice);
+                    }
+
+                    water.interact_with_balls(balls, world.gravity.y);
+                    water.update_surface(world.timeslice);
+
+                    let real_time = performance.now();
+                    let duration = real_time - world.real_time;
+                    document.getElementById("performance").innerHTML = duration.toFixed(3);
+                    world.real_time = real_time;
+
+                    world.time += world.timeslice;
+                },
+
+                render: function () {
+                    water.enable_rendering(false);
+                    renderer.setRenderTarget(framebuffer);
+                    renderer.clear();
+                    renderer.render(scene, camera);
+
+                    water.enable_rendering(true);
+                    renderer.setRenderTarget(null);
+                    renderer.render(scene, camera);
+                },
+            };
+
+            function pause_or_resume()
+            {
+                world.paused = !world.paused;
+                document.getElementById("button-run").innerHTML = (world.paused ? "Resume" : "Pause");
+            }
+
+            function restart()
+            {
+                world.paused = true;
+                document.getElementById("button-run").innerHTML = "Run";
+                document.getElementById("performance").innerHTML = (0.0).toFixed(3);
+
+                let screen_width = window.innerWidth - shrink_x;
+                let screen_height = window.innerHeight - shrink_y;
+
+                scene = new THREE.Scene();
+
+                scene.add(new THREE.AmbientLight(0x505050));
+                scene.fog = new THREE.Fog(0x000000, 0.0, 15.0);
+
+                {
+                    let spot_light = new THREE.SpotLight(0xFFFFFF);
+                    spot_light.angle = Math.PI / 5.0;
+                    spot_light.penumbra = 0.2;
+                    spot_light.position.set(2.0, 3.0, 3.0);
+                    spot_light.castShadow = true;
+                    spot_light.shadow.camera.near = 1.0;
+                    spot_light.shadow.camera.fat = 10.0;
+                    spot_light.shadow.mapSize.width = 1024;
+                    spot_light.shadow.mapSize.height = 1024;
+                    scene.add(spot_light);
+                }
+
+                {
+                    let directional_light = new THREE.DirectionalLight(0x55505A, 1.0);
+                    directional_light.position.set(0.0, 3.0, 0.0);
+                    directional_light.castShadow = true;
+                    directional_light.shadow.camera.near = 1.0;
+                    directional_light.shadow.camera.far = 10.0;
+                    directional_light.shadow.camera.right = 1.0;
+                    directional_light.shadow.camera.left = -1.0;
+                    directional_light.shadow.camera.top = 1.0;
+                    directional_light.shadow.camera.bottom = -1.0;
+                    directional_light.shadow.mapSize.width = 1024;
+                    directional_light.shadow.mapSize.height = 1024;
+                    scene.add(directional_light);
+                }
+
+                {
+                    let geometry = new THREE.PlaneBufferGeometry(20.0, 20.0, 1.0, 1.0);
+                    let material = new THREE.MeshPhongMaterial({color: 0xA0ADAF, shininess: 150.0});
+                    let ground = new THREE.Mesh(geometry, material);
+                    ground.rotation.x = -Math.PI / 2.0;
+                    ground.receiveShadow = true;
+                    scene.add(ground);
+                }
+
+                {
+                    let helper = new THREE.GridHelper(20.0, 20.0);
+                    helper.material.opacity = 1.0;
+                    helper.material.transparent = true;
+                    helper.position.set(0.0, 0.002, 0.0);
+                    scene.add(helper);
+                }
+
+                {
+                    camera = new THREE.PerspectiveCamera(60.0, screen_width / screen_height, 0.01, 100.0);
+                    camera.position.set(0.0, 2.1, 1.5);
+                    camera.updateMatrixWorld();
+                    camera.updateProjectionMatrix();
+                    scene.add(camera);
+                }
+
+                if (!initialized) {
+                    initialized = true;
+
+                    renderer = new THREE.WebGLRenderer();
+                    renderer.shadowMap.enabled = true;
+                    renderer.setPixelRatio(window.devicePixelRatio);
+                    container.appendChild(renderer.domElement);
+
+                    framebuffer = new THREE.WebGLRenderTarget(
+                        screen_width,
+                        screen_height,
+                        {
+                            minFilter: THREE.LinearFilter,
+                            magFilter: THREE.NearestFilter,
+                            format: THREE.RGBAFormat,
+                        },
+                    )
+
+                    grabber = new Grabber();
+                }
+
+                renderer.setSize(screen_width, screen_height);
+                framebuffer.setSize(screen_width, screen_height);
+
+                controller = new THREE.OrbitControls(camera, renderer.domElement);
+                controller.zoomSpeed = 2.0;
+                controller.panSpeed = 0.4;
+                controller.target = new THREE.Vector3(0.0, 0.8, 0.0);
+                controller.update();
+
+                {
+                    let tank_size = world.tank_size;
+                    let tank_border_thickness = world.tank_border_thickness;
+                    let material = new THREE.MeshPhongMaterial({color: 0x909090});
+                    let geometry_yoz_plane_aligned = new THREE.BoxGeometry(tank_border_thickness, tank_size.y, tank_size.z + 2.0 * tank_border_thickness);
+                    let box_left = new THREE.Mesh(geometry_yoz_plane_aligned, material);
+                    box_left.position.set(-0.5 * (tank_size.x + tank_border_thickness), 0.5 * tank_size.y, 0.0);
+                    scene.add(box_left);
+                    let box_right = new THREE.Mesh(geometry_yoz_plane_aligned, material);
+                    box_right.position.set(0.5 * (tank_size.x + tank_border_thickness), 0.5 * tank_size.y, 0.0);
+                    scene.add(box_right);
+                    let geometry_xoy_plane_aligned = new THREE.BoxGeometry(tank_size.x + 2.0 * tank_border_thickness, tank_size.y, tank_border_thickness);
+                    let box_front = new THREE.Mesh(geometry_xoy_plane_aligned, material);
+                    box_front.position.set(0.0, 0.5 * tank_size.y, 0.5 * (tank_size.z + tank_border_thickness));
+                    scene.add(box_front);
+                    let box_back = new THREE.Mesh(geometry_xoy_plane_aligned, material);
+                    box_back.position.set(0.0, 0.5 * tank_size.y, -0.5 * (tank_size.z + tank_border_thickness));
+                    scene.add(box_back);
+                }
+
+                {
+                    balls = [];
+                    balls.push(Ball.from(
+                        new THREE.Vector3(-0.5, 1.0, -0.5),
+                        0.2,
+                        2.0,
+                        0xFFFF00,
+                    ));
+                    balls.push(Ball.from(
+                        new THREE.Vector3(0.5, 1.0, -0.5),
+                        0.3,
+                        0.7,
+                        0xFF8000,
+                    ));
+                    balls.push(Ball.from(
+                        new THREE.Vector3(0.5, 1.0, 0.5),
+                        0.25,
+                        0.2,
+                        0xFF0000,
+                    ));
+                    for (let i = 0; i < balls.length; i++) {
+                        let ball = balls[i];
+                        ball.set_bounds(world.tank_size, world.tank_border_thickness);
+                        ball.add_to(scene);
+                    }
+                }
+
+                {
+                    let config = new Water_Config();
+                    config.size = world.tank_size;
+                    config.spacing = 0.02;
+                    water = Water.from(config);
+                    water.add_to(scene);
+                }
+            }
+
+            function mainloop()
+            {
+                world.update();
+                world.render();
+
+                requestAnimationFrame(mainloop);
+            }
+
+            restart();
+            mainloop();
+
+            function on_window_resize()
+            {
+                let screen_width = window.innerWidth - shrink_x;
+                let screen_height = window.innerHeight - shrink_y;
+                camera.aspect = screen_width / screen_height;
+                camera.updateProjectionMatrix();
+                renderer.setSize(screen_width, screen_height);
+                framebuffer.setSize(screen_width, screen_height);
+            }
+
+            window.addEventListener("resize", on_window_resize, false);
+        </script>
+    </body>
+</html>
+
