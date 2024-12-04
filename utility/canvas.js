@@ -163,6 +163,43 @@ class Canvas
         this._render_circle(c, r, true);
     }
 
+    _begin_band(band)
+    {
+        let p = this.plotting_scale.world_to_canvas(band.line.point0);
+        this.context.translate(p.x, p.y);
+        this.context.rotate(-band.line.angle);
+    }
+
+    _end_band()
+    {
+        this.context.resetTransform();
+    }
+
+    render_band(band, color = "#FFFFFF")
+    {
+        this._begin_band(band);
+
+        let l = this.plotting_scale.scale * band.line.length;
+        let r = this.plotting_scale.scale * band.thickness;
+        this.context.fillStyle = color;
+        this.context.fillRect(0.0, -r, l, 2.0 * r);
+
+        this._end_band();
+    }
+
+    render_wireframe_band(band, width, color = "#000000")
+    {
+        this._begin_band(band);
+
+        let l = this.plotting_scale.scale * line.length;
+        let r = this.plotting_scale.scale * thickness;
+        this.context.lineWidth = width;
+        this.context.fillStyle = color;
+        this.context.strokeRect(0.0, -r, l, 2.0 * r);
+
+        this._end_band();
+    }
+
     render_rod(rod, color = "#FFFFFF")
     {
         let line = rod.line;
