@@ -1,0 +1,274 @@
+<!--
+Copyright 2022 Matthias Müller - Ten Minute Physics, https://www.youtube.com/channel/UCTG_vrRdKYfrpqCv_WV4eyA
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+-->
+
+<!DOCTYPE html>
+<html lang = "en">
+    <meta charset = "UTF-8" name = "viewport" content = "width = device-width, initial-scale = 1.0">
+
+    <head>
+        <title>Iterated Function Systems</title>
+        <style>
+            body {
+                font-family: "Cascadia Code";
+                font-size: 15px;
+                fieldset {
+                    display: inline-block;
+                };
+                input[type = "range"] {
+                    height: 15px;
+                };
+            };
+            .button {
+                background-color: #606060;
+                border: none;
+                color: white;
+                padding: 10px 10px;
+                font-size: 16px;
+                margin: 4px 2px;
+                cursor: pointer;
+            };
+            .slider {
+                appearance: none;
+                width: 80px;
+                height: 6px;
+                border-radius: 5px;
+                background: #D3D3D3;
+                outline: none;
+                opacity: 0.7;
+                transition: opacity 0.2s;
+            };
+        </style>
+    </head>
+
+    <body>
+        <fieldset id = "type">
+            <legend>Type</legend>
+            <label><input type = "radio" id = "fern" name = "type" value = "fern" checked>Fern</label>
+            <label><input type = "radio" id = "dragon" name = "type" value = "dragon">Dragon</label>
+            <label><input type = "radio" id = "giant-x" name = "type" value = "giant-x">Giant X</label>
+            <label><input type = "radio" id = "sierpinski-triangle" name = "type" value = "sierpinski-triangle">Sierpinski Triangle</label>
+        </fieldset>
+
+        <fieldset>
+            <legend>Points</legend>
+            <input type = "range" min = "1" max = "100" value = "10" id = "num-points">
+            <label id = "num-points-label" for = "num-points">1000</label>
+        </fieldset>
+
+        <fieldset>
+            <legend>Iterations</legend>
+            <label id = "num-iterations-label" for = "num-iterations">Count</label>
+            <span id = "num-iterations">1</span>
+            <button class = "button" type = "button" onclick = "increase_num_iterations()">+</button>
+            <button class = "button" type = "button" onclick = "decrease_num_iterations()">-</button>
+            <label id = "step-label" for = "step">Step</label>
+            <span id = "step">1</span>
+            <button class = "button" type = "button" onclick = "increase_tunning_step()">+</button>
+            <button class = "button" type = "button" onclick = "decrease_tunning_step()">-</button>
+        </fieldset>
+
+        <br>
+        <br>
+        <canvas id = "canvas"></canvas>
+
+        <script src = "../utility/math/vector.js"></script>
+        <script src = "../utility/math/matrix.js"></script>
+        <script src = "../utility/canvas.js"></script>
+        <script src = "./fern.js"></script>
+        <script src = "./dragon.js"></script>
+        <script src = "./giant-x.js"></script>
+        <script src = "./sierpinski-triangle.js"></script>
+        <script>
+            let canvas = document.getElementById("canvas");
+            canvas.width = Math.min(window.innerWidth - 10, window.innerHeight - 100);
+            canvas.height = canvas.width;
+            canvas.focus();
+
+            let context = canvas.getContext("2d", { willReadFrequently: true});
+
+            let type = undefined;
+            let config = undefined;
+
+            let num_points = undefined;
+            let num_iterations = undefined;
+            let iterations_step_size = undefined;
+
+            let points = undefined;
+
+            let num_points_fixed_width = 6;
+            let num_iterations_fixed_width = 3;
+            let iterations_step_size_fixed_width = 2;
+
+            function ifs_config()
+            {
+                if (false) {}
+                else if (type == "fern") {
+                    config = ifs_store.fern;
+                }
+                else if (type == "dragon") {
+                    config = ifs_store.dragon;
+                }
+                else if (type == "giant-x") {
+                    config = ifs_store.giant_x;
+                }
+                else if (type == "sierpinski-triangle") {
+                    config = ifs_store.sierpinski_triangle;
+                }
+                else {
+                    // Nothing to do.
+                }
+            }
+
+            function create_points()
+            {
+                points = [];
+                for (let i = 0; i < num_points; i++) {
+                    points.push(Vector2.from_components(Math.random(), Math.random()));
+                }
+            }
+
+            function fill_width(string, width, char)
+            {
+                let result = "";
+                for (let i = 0; i < width - string.length; i++) {
+                    result += char;
+                }
+                result += string;
+                return result;
+            }
+
+            function draw()
+            {
+                let width = canvas.width;
+                let height = canvas.height;
+
+                context.clearRect(0, 0, width, height);
+                context.fillStyle = "#FFFFFF";
+
+                let image = context.getImageData(0, 0, width, height);
+                for (let i = 0; i < num_points; i++) {
+                    let color = {
+                        value: [0, 0, 0, 255],
+                        weight: 0.0,
+                    };
+                    let point = points[i];
+                    let matrix = Matrix3x3.from_components(1.0);
+                    for (let j = 0; j < num_iterations; j++) {
+                        let selection = Math.random();
+                        for (let k = 0; k < config.length; k++) {
+                            let conf = config[k];
+                            if (selection < conf.probability) {
+                                matrix.left_multiply(conf.transformation);
+                                color.value[0] = color.value[0] + conf.color.weight * conf.color.value[0];
+                                color.value[1] = color.value[1] + conf.color.weight * conf.color.value[1];
+                                color.value[2] = color.value[2] + conf.color.weight * conf.color.value[2];
+                                color.value[3] = color.value[3] + conf.color.weight * conf.color.value[3];
+                                color.weight += conf.color.weight;
+                                break;
+                            } else {
+                                selection -= conf.probability;
+                            }
+                        }
+                    }
+                    color.value[0] = Math.floor(color.value[0] / color.weight);
+                    color.value[1] = Math.floor(color.value[1] / color.weight);
+                    color.value[2] = Math.floor(color.value[2] / color.weight);
+                    color.value[3] = Math.floor(color.value[3] / color.weight);
+
+                    let transformed_point = matrix.transform(point);
+                    let x = Math.floor(width * transformed_point.x);
+                    let y = width - Math.floor(width * transformed_point.y);
+                    let index = (x + y * width) * 4;
+                    image.data[index++] = color.value[0];
+                    image.data[index++] = color.value[1];
+                    image.data[index++] = color.value[2];
+                    image.data[index++] = color.value[3];
+                }
+                context.putImageData(image, 0, 0);
+            }
+
+            function restart()
+            {
+                type = "fern";
+                let radios = document.querySelectorAll(`input[type = "radio"][name = "type"]`);
+                radios.forEach(radio => {
+                    if (radio.value == type) {
+                        radio.checked = true;
+                    }
+                });
+
+                num_points = 10000;
+                document.getElementById("num-points").value = num_points / 1000;
+                document.getElementById("num-points-label").innerHTML = fill_width(num_points.toString(), num_points_fixed_width, "&nbsp");
+
+                num_iterations = 0;
+                document.getElementById("num-iterations").innerHTML = fill_width(num_iterations.toString(), num_iterations_fixed_width, "&nbsp");
+
+                iterations_step_size = 1;
+                document.getElementById("step").innerHTML = fill_width(iterations_step_size.toString(), iterations_step_size_fixed_width, "&nbsp");
+
+                create_points();
+                ifs_config();
+                draw();
+            }
+
+            function mainloop()
+            {
+                requestAnimationFrame(mainloop);
+            }
+
+            restart();
+            mainloop();
+
+            function increase_num_iterations()
+            {
+                num_iterations += iterations_step_size;
+                document.getElementById("num-iterations").innerHTML = fill_width(num_iterations.toString(), num_iterations_fixed_width, "&nbsp");
+
+                draw();
+            }
+
+            function decrease_num_iterations()
+            {
+                num_iterations = Math.max(num_iterations - iterations_step_size, 0);
+                document.getElementById("num-iterations").innerHTML = fill_width(num_iterations.toString(), num_iterations_fixed_width, "&nbsp");
+
+                draw();
+            }
+
+            function increase_tunning_step()
+            {
+                iterations_step_size++;
+                document.getElementById("step").innerHTML = fill_width(iterations_step_size.toString(), iterations_step_size_fixed_width, "&nbsp");
+            }
+
+            function decrease_tunning_step()
+            {
+                iterations_step_size = Math.max(iterations_step_size - 1, 1);
+                document.getElementById("step").innerHTML = fill_width(iterations_step_size.toString(), iterations_step_size_fixed_width, "&nbsp");
+            }
+
+            document.getElementById("num-points").oninput = function () {
+                num_points = this.value * 1000;
+                document.getElementById("num-points-label").innerHTML = fill_width(num_points.toString(), num_points_fixed_width, "&nbsp");
+
+                create_points();
+                draw();
+            };
+            document.getElementById("type").addEventListener("change", (event) => {
+                type = event.target.value;
+
+                ifs_config();
+                draw();
+            });
+        </script>
+    </body>
+</html>
+
